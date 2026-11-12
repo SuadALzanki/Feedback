@@ -60,7 +60,7 @@ def render_logo(width=260):
         st.markdown(
             f"""
             <div style="display:flex; justify-content:center; margin-bottom:8px;">
-                <img src="data:image/png;base64,{b64}" style="width:{width}px; max-width:90%; height:auto;">
+                <img src="data:image/png;base64,{b64}" style="width:{width}px; max-width:90%; height:auto; transform:translateX(-5%);">
             </div>
             """,
             unsafe_allow_html=True,
