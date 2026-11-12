@@ -25,6 +25,12 @@ LOGO_PATH = Path(__file__).parent / "aum_logo.png"
 
 profanity.load_censor_words()
 
+# Hide the little link icon Streamlit adds next to headings (it pushes titles off-centre)
+st.markdown(
+    "<style>[data-testid='stHeaderActionElements'], h1 a, h2 a {display:none !important;}</style>",
+    unsafe_allow_html=True,
+)
+
 
 def _secret(key, default=None):
     """Read a Streamlit secret without crashing when no secrets are set."""
@@ -54,7 +60,7 @@ def render_logo(width=260):
         st.markdown(
             f"""
             <div style="display:flex; justify-content:center; margin-bottom:8px;">
-                <img src="data:image/png;base64,{b64}" width="{width}">
+                <img src="data:image/png;base64,{b64}" style="width:{width}px; max-width:90%; height:auto;">
             </div>
             """,
             unsafe_allow_html=True,
@@ -162,7 +168,7 @@ def is_clean(text):
 
 # ---------- SUBMIT VIEW (what the QR code opens) ----------
 def render_submit():
-    render_logo(width=220)
+    render_logo(width=520)
 
     st.markdown(
         """
@@ -225,7 +231,7 @@ GRADIENTS = [
 def render_display():
     st_autorefresh(interval=DISPLAY_REFRESH_MS, key="display_autorefresh")
 
-    render_logo(width=200)
+    render_logo(width=600)
 
     st.markdown(
         """
