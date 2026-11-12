@@ -60,7 +60,7 @@ def render_logo(width=260):
         st.markdown(
             f"""
             <div style="display:flex; justify-content:center; margin-bottom:8px;">
-                <img src="data:image/png;base64,{b64}" style="width:{width}px; max-width:90%; height:auto; transform:translateX(-9%);">
+                <img class="fb-logo" src="data:image/png;base64,{b64}" style="width:{width}px; max-width:90%; height:auto; transform:translateX(-9%);">
             </div>
             """,
             unsafe_allow_html=True,
@@ -231,13 +231,35 @@ GRADIENTS = [
 def render_display():
     st_autorefresh(interval=DISPLAY_REFRESH_MS, key="display_autorefresh")
 
+    # Extra styling that only applies when the booth screen is VERTICAL (portrait).
+    # On a normal horizontal screen nothing changes.
+    st.markdown(
+        """
+        <style>
+        @media (orientation: portrait) {
+            .fb-logo     { width: 75vw !important; max-width: 75vw !important; margin-top: 4vh; }
+            .fb-title    { font-size: 4rem !important; margin-top: 2vh !important; }
+            .fb-subtitle { font-size: 1.6rem !important; }
+            .fb-card     { max-width: 90vw !important; margin-top: 8vh !important; padding: 10vh 6vw !important; }
+            .fb-cert     { font-size: 1.6rem !important; }
+            .fb-text     { font-size: 3rem !important; line-height: 1.45 !important; }
+            .fb-name     { font-size: 2rem !important; }
+            .fb-dots     { font-size: 1.8rem !important; margin-top: 4vh !important; }
+            .fb-waiting h2 { font-size: 3.2rem !important; margin-top: 15vh; }
+            .fb-waiting p  { font-size: 1.8rem !important; }
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
     render_logo(width=600)
 
     st.markdown(
         """
         <div style="text-align:center; padding: 6px 0 4px 0;">
-            <h1 style="color:#b3423e; font-size:2.4rem; margin-bottom:0;">Student Voices</h1>
-            <p style="color:#666; font-size:1.1rem; margin-top:4px;">
+            <h1 class="fb-title" style="color:#b3423e; font-size:2.4rem; margin-bottom:0;">Student Voices</h1>
+            <p class="fb-subtitle" style="color:#666; font-size:1.1rem; margin-top:4px;">
                 What our students are saying about Coursera certificates &amp; guided projects
             </p>
         </div>
@@ -254,7 +276,7 @@ def render_display():
     if n == 0:
         st.markdown(
             """
-            <div style="text-align:center; margin-top:80px;">
+            <div class="fb-waiting" style="text-align:center; margin-top:80px;">
                 <h2 style="color:#888;">Waiting for the first feedback...</h2>
                 <p style="color:#aaa;">Scan the QR code to share yours!</p>
             </div>
@@ -287,7 +309,7 @@ def render_display():
 
     st.markdown(
         f"""
-        <div style="
+        <div class="fb-card" style="
             background:{bg};
             border-radius:24px;
             padding:50px 60px;
@@ -296,7 +318,7 @@ def render_display():
             box-shadow: 0 20px 45px rgba(0,0,0,0.25);
             animation: fadeIn 0.8s ease-in;
         ">
-            <div style="
+            <div class="fb-cert" style="
                 display:inline-block;
                 background:rgba(255,255,255,0.18);
                 color:white;
@@ -306,14 +328,14 @@ def render_display():
                 font-size:1.1rem;
                 margin-bottom: 24px;
             ">🏆 {cert}</div>
-            <p style="
+            <p class="fb-text" style="
                 color:white;
                 font-size:1.9rem;
                 line-height:1.5;
                 font-style:italic;
                 margin: 10px 0 30px 0;
             ">&ldquo;{text}&rdquo;</p>
-            <p style="
+            <p class="fb-name" style="
                 color:rgba(255,255,255,0.9);
                 font-size:1.3rem;
                 font-weight:700;
@@ -334,12 +356,12 @@ def render_display():
     if n <= 15:
         dots = "".join("●" if i == idx else "○" for i in range(n))
         st.markdown(
-            f"<p style='text-align:center; color:#999; letter-spacing:6px; font-size:1.2rem;'>{dots}</p>",
+            f"<p class='fb-dots' style='text-align:center; color:#999; letter-spacing:6px; font-size:1.2rem;'>{dots}</p>",
             unsafe_allow_html=True,
         )
     else:
         st.markdown(
-            f"<p style='text-align:center; color:#999; font-size:1.1rem;'>Feedback {idx + 1} of {n}</p>",
+            f"<p class='fb-dots' style='text-align:center; color:#999; font-size:1.1rem;'>Feedback {idx + 1} of {n}</p>",
             unsafe_allow_html=True,
         )
 
