@@ -1,8 +1,12 @@
 import base64
+import csv
 import html
+import io
 import sqlite3
+import uuid
 from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import streamlit as st
 from streamlit_autorefresh import st_autorefresh
@@ -11,13 +15,29 @@ from better_profanity import profanity
 # ---------- CONFIG ----------
 st.set_page_config(page_title="AUM Certificate Feedback Wall", layout="wide")
 
-DB_PATH = Path(__file__).parent / "feedback.db"
+DB_PATH = Path(__file__).parent / "feedback.db"   # local fallback only
 DISPLAY_REFRESH_MS = 7000  # how often the booth screen advances (7 seconds)
+KUWAIT_TZ = ZoneInfo("Asia/Kuwait")
+SHEET_HEADERS = ["id", "certificate_name", "student_name", "feedback_text", "created_at"]
 
 # Put your logo file next to this script with this exact filename.
 LOGO_PATH = Path(__file__).parent / "aum_logo.png"
 
 profanity.load_censor_words()
+
+
+def _secret(key, default=None):
+    """Read a Streamlit secret without crashing when no secrets are set."""
+    try:
+        return st.secrets.get(key, default)
+    except Exception:
+        return default
+
+
+# Permanent storage = Google Sheet (set in Streamlit Secrets).
+# Without those secrets the app falls back to a local SQLite file, which is
+# fine for testing on your laptop but is WIPED on Streamlit Cloud restarts.
+USE_SHEETS = bool(_secret("gcp_service_account")) and bool(_secret("SHEET_URL"))
 
 
 # ---------- LOGO ----------
@@ -41,7 +61,19 @@ def render_logo(width=260):
         )
 
 
-# ---------- DATABASE HELPERS ----------
+# ---------- STORAGE: GOOGLE SHEETS (permanent) ----------
+@st.cache_resource(show_spinner=False)
+def get_worksheet():
+    import gspread
+
+    gc = gspread.service_account_from_dict(dict(_secret("gcp_service_account")))
+    ws = gc.open_by_url(_secret("SHEET_URL")).sheet1
+    if not ws.row_values(1):
+        ws.append_row(SHEET_HEADERS)
+    return ws
+
+
+# ---------- STORAGE: SQLITE (local testing only) ----------
 def get_conn():
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     conn.execute(
@@ -58,37 +90,69 @@ def get_conn():
     return conn
 
 
+# ---------- DATA FUNCTIONS (same interface for both storages) ----------
 def add_feedback(certificate_name, student_name, feedback_text):
-    conn = get_conn()
-    conn.execute(
-        "INSERT INTO feedback (certificate_name, student_name, feedback_text, created_at) "
-        "VALUES (?, ?, ?, ?)",
-        (
-            certificate_name.strip(),
-            (student_name or "").strip(),
-            feedback_text.strip(),
-            datetime.now().isoformat(timespec="seconds"),
-        ),
-    )
-    conn.commit()
-    conn.close()
+    cert = certificate_name.strip()
+    name = (student_name or "").strip()
+    text = feedback_text.strip()
+    created_at = datetime.now(KUWAIT_TZ).strftime("%Y-%m-%d %H:%M:%S")
+
+    if USE_SHEETS:
+        # RAW = store exactly as typed (stops students injecting sheet formulas)
+        get_worksheet().append_row(
+            [uuid.uuid4().hex[:10], cert, name, text, created_at],
+            value_input_option="RAW",
+        )
+    else:
+        conn = get_conn()
+        conn.execute(
+            "INSERT INTO feedback (certificate_name, student_name, feedback_text, created_at) "
+            "VALUES (?, ?, ?, ?)",
+            (cert, name, text, created_at),
+        )
+        conn.commit()
+        conn.close()
+    get_all_feedback.clear()
 
 
+@st.cache_data(ttl=5, show_spinner=False)
 def get_all_feedback():
+    """Returns a list of (id, certificate, name, feedback, created_at), oldest first."""
+    if USE_SHEETS:
+        rows = get_worksheet().get_all_values()[1:]  # skip header
+        rows = [tuple((r + [""] * 5)[:5]) for r in rows]
+        return [r for r in rows if r[1].strip() and r[3].strip()]
+
     conn = get_conn()
     rows = conn.execute(
         "SELECT id, certificate_name, student_name, feedback_text, created_at "
         "FROM feedback ORDER BY id ASC"
     ).fetchall()
     conn.close()
-    return rows
+    return [(str(r[0]),) + tuple(r[1:]) for r in rows]
 
 
 def delete_feedback(feedback_id):
-    conn = get_conn()
-    conn.execute("DELETE FROM feedback WHERE id = ?", (feedback_id,))
-    conn.commit()
-    conn.close()
+    if USE_SHEETS:
+        ws = get_worksheet()
+        ids = ws.col_values(1)
+        if feedback_id in ids:
+            ws.delete_rows(ids.index(feedback_id) + 1)
+    else:
+        conn = get_conn()
+        conn.execute("DELETE FROM feedback WHERE id = ?", (int(feedback_id),))
+        conn.commit()
+        conn.close()
+    get_all_feedback.clear()
+
+
+def feedback_csv(entries):
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(["Certificate", "Student", "Feedback", "Submitted"])
+    for _, cert, name, text, created_at in entries:
+        writer.writerow([cert, name or "Anonymous Student", text, created_at])
+    return buf.getvalue().encode("utf-8-sig")  # utf-8-sig so Excel shows Arabic correctly
 
 
 # ---------- CONTENT FILTER ----------
@@ -139,8 +203,11 @@ def render_submit():
                 "Please keep your feedback respectful and appropriate, then try again."
             )
         else:
-            add_feedback(certificate_name, student_name, feedback_text)
-            st.success("Thank you! Your feedback will appear on the screen shortly. 🎉")
+            try:
+                add_feedback(certificate_name, student_name, feedback_text)
+                st.success("Thank you! Your feedback will appear on the screen shortly. 🎉")
+            except Exception:
+                st.error("Sorry, we couldn't save your feedback. Please try again in a moment.")
 
 
 # ---------- DISPLAY VIEW (the booth screen, styled like branded slides) ----------
@@ -172,7 +239,10 @@ def render_display():
         unsafe_allow_html=True,
     )
 
-    entries = get_all_feedback()
+    try:
+        entries = get_all_feedback()
+    except Exception:
+        entries = []
     n = len(entries)
 
     if n == 0:
@@ -272,13 +342,8 @@ def render_display():
 def render_admin():
     st.title("🔒 Feedback Moderation")
 
-    try:
-        admin_password = st.secrets.get("ADMIN_PASSWORD", "changeme123")
-    except Exception:
-        # No secrets.toml configured yet (e.g. first local run) - fall back
-        # to a default so the page still works. Set a real ADMIN_PASSWORD
-        # in the app's Streamlit Cloud "Secrets" settings before the event.
-        admin_password = "changeme123"
+    # Set a real ADMIN_PASSWORD in the app's Streamlit Cloud "Secrets".
+    admin_password = _secret("ADMIN_PASSWORD", "changeme123")
 
     if not st.session_state.get("admin_authed", False):
         pw = st.text_input("Enter admin password", type="password")
@@ -291,12 +356,27 @@ def render_admin():
         return
 
     st.success("Logged in as moderator.")
+    if USE_SHEETS:
+        st.caption("✅ Storage: Google Sheet (permanent)")
+    else:
+        st.warning(
+            "⚠️ Storage: local file only. Feedback will be LOST when the app restarts. "
+            "Add the Google Sheet secrets to make it permanent."
+        )
+
     entries = get_all_feedback()
     st.caption(f"{len(entries)} total feedback entries")
 
     if not entries:
         st.info("No feedback submitted yet.")
         return
+
+    st.download_button(
+        "⬇️ Download all feedback (CSV / Excel)",
+        data=feedback_csv(entries),
+        file_name=f"aum_feedback_{datetime.now(KUWAIT_TZ):%Y-%m-%d}.csv",
+        mime="text/csv",
+    )
 
     for fid, cert, name, text, created_at in reversed(entries):
         display_name = name.strip() if name and name.strip() else "Anonymous Student"

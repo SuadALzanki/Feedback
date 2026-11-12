@@ -2,3 +2,5 @@ streamlit
 plotly
 streamlit-autorefresh
 better-profanity
+gspread
+tzdata
